@@ -1,0 +1,76 @@
+image: registry.secoder.net/tool/deployer
+
+variables:
+  SERVICE_TAG: service-$CI_COMMIT_REF_SLUG
+  TEST_SERVICE_TAG: test-service-$CI_COMMIT_REF_SLUG
+  PUSH_SERVICE_TAG: push-service-$CI_COMMIT_REF_SLUG
+  PLAYGROUND_TAG: playground-$CI_COMMIT_REF_SLUG
+
+.setup:
+  image: golang:latest
+  before_script:
+    - go env -w GO111MODULE=on
+    - go env -w GOPROXY=https://goproxy.cn,direct
+    - go mod download
+
+stages:
+  - test
+  - build
+  - deploy
+
+test:
+  stage: test
+  extends: .setup
+  script:
+    - go test -cover -race -v -coverprofile=coverage.out ./...
+  after_script:
+    - SUFFIX=$RANDOM
+    - curl "http://10.0.0.11/sonar-scanner.tar.gz" -s -o "/tmp/sonar-$SUFFIX.tar.gz"
+    - tar -xf "/tmp/sonar-$SUFFIX.tar.gz" -C /opt
+    - /opt/sonar-scanner/bin/sonar-scanner
+
+.build:
+  stage: build
+  script:
+    - export BUILD_IMAGE_NAME=$CI_REGISTRY_IMAGE
+    - export BUILD_IMAGE_USERNAME=$CI_REGISTRY_USER
+    - export BUILD_IMAGE_PASSWORD=$CI_REGISTRY_PASSWORD
+    - deployer build
+
+build-service:
+  extends: .build
+  before_script:
+    - export BUILD_IMAGE_TAG=$SERVICE_TAG
+    - mv Dockerfile.service Dockerfile
+
+build-test-service:
+  extends: .build
+  before_script:
+    - export BUILD_IMAGE_TAG=$TEST_SERVICE_TAG
+    - mv Dockerfile.test-service Dockerfile
+
+build-push-service:
+  extends: .build
+  before_script:
+    - export BUILD_IMAGE_TAG=$PUSH_SERVICE_TAG
+    - mv Dockerfile.push-service Dockerfile
+
+build-playground:
+  extends: .build
+  before_script:
+    - export BUILD_IMAGE_TAG=$PLAYGROUND_TAG
+    - mv Dockerfile.playground Dockerfile
+
+deploy:
+  stage: deploy
+  script:
+    - if [ "$CI_COMMIT_REF_SLUG" == "master" ]; then SUFFIX=""; else SUFFIX="-dev"; fi
+    - deployer dyno replace service$SUFFIX "$CI_REGISTRY_IMAGE:$SERVICE_TAG" "$REGISTRY_USER" "$REGISTRY_PWD"
+    - deployer dyno replace push-service$SUFFIX "$CI_REGISTRY_IMAGE:$PUSH_SERVICE_TAG" "$REGISTRY_USER" "$REGISTRY_PWD"
+    - deployer dyno replace service-2$SUFFIX "$CI_REGISTRY_IMAGE:$SERVICE_TAG" "$REGISTRY_USER" "$REGISTRY_PWD"
+    - deployer dyno replace push-service-2$SUFFIX "$CI_REGISTRY_IMAGE:$PUSH_SERVICE_TAG" "$REGISTRY_USER" "$REGISTRY_PWD"
+    - deployer dyno replace test-service$SUFFIX "$CI_REGISTRY_IMAGE:$TEST_SERVICE_TAG" "$REGISTRY_USER" "$REGISTRY_PWD"
+    - deployer dyno replace playground-backend "$CI_REGISTRY_IMAGE:$PLAYGROUND_TAG" "$REGISTRY_USER" "$REGISTRY_PWD"
+  only:
+    - dev
+    - master

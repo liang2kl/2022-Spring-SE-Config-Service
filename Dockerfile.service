@@ -1,0 +1,24 @@
+FROM golang:1.18 AS build
+
+ENV GOPROXY=https://goproxy.cn,direct
+ENV GO111MODULE=on
+ENV CGO_ENABLED=0
+
+ENV HOME /app
+WORKDIR $HOME
+
+COPY . .
+
+RUN go mod download
+
+RUN go build -o ./config-service ./cmd/configservice/
+
+FROM alpine:latest
+
+COPY --from=build /app/config-service /app/config-service
+
+WORKDIR /app
+
+EXPOSE 80
+
+CMD ["./config-service"]

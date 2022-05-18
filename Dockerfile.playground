@@ -1,0 +1,24 @@
+FROM golang:1.18 AS build
+
+ENV GOPROXY=https://goproxy.cn,direct
+ENV GO111MODULE=on
+ENV CGO_ENABLED=0
+
+ENV HOME /app
+WORKDIR $HOME
+
+COPY . .
+
+RUN go mod download
+
+RUN go build -o ./playground ./cmd/playground/
+
+FROM alpine:latest
+
+COPY --from=build /app/playground /app/playground
+
+WORKDIR /app
+
+EXPOSE 80
+
+CMD ["./playground"]
